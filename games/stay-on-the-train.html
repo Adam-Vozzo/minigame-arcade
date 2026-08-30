@@ -30,12 +30,24 @@
   #balring{position:absolute;inset:14%;border-radius:50%;border:1px dashed #3a4448}
   #baldot{position:absolute;width:16px;height:16px;border-radius:50%;background:#7dff9b;
     left:50%;top:50%;transform:translate(-50%,-50%);box-shadow:0 0 10px rgba(125,255,155,.6)}
+  .tick{position:absolute;width:20px;height:20px;line-height:20px;font-size:12px;color:#4a565c;
+    text-align:center;border-radius:4px;transform:translate(-50%,-50%);transition:color .1s,background .1s}
+  #tickW{left:50%;top:9%}#tickS{left:50%;top:91%}#tickA{left:9%;top:50%}#tickD{left:91%;top:50%}
+  .tick.want{color:#0b0d10;background:#ffd23f;box-shadow:0 0 12px rgba(255,210,63,.8);
+    animation:tickpulse .4s infinite}
+  .tick.pressed{color:#0b0d10;background:#7dff9b}
+  @keyframes tickpulse{50%{transform:translate(-50%,-50%) scale(1.25)}}
+  #balwrap.brace #balgauge{transform:scale(1.25);border-color:#ff5c5c}
+  #balgauge{transition:transform .3s}
   #subtitle{position:absolute;bottom:22%;left:50%;transform:translateX(-50%);
     font-size:19px;letter-spacing:.14em;color:#ffe9a8;text-shadow:0 2px 8px #000;
     background:rgba(0,0,0,.5);padding:6px 18px;white-space:nowrap}
-  #brace{position:absolute;top:40%;left:50%;transform:translate(-50%,-50%);
-    font-size:64px;color:#ff5c5c;letter-spacing:.3em;text-shadow:0 0 30px rgba(255,92,92,.8);
-    animation:pulse2 .25s infinite;display:none}
+  #brace{position:absolute;top:38%;left:50%;transform:translate(-50%,-50%);
+    text-align:center;display:none}
+  #brace .big{font-size:64px;color:#ff5c5c;letter-spacing:.3em;
+    text-shadow:0 0 30px rgba(255,92,92,.8);animation:pulse2 .25s infinite}
+  #brace .how{font-size:18px;color:#ffd23f;letter-spacing:.12em;margin-top:6px;
+    text-shadow:0 2px 8px #000;background:rgba(0,0,0,.5);padding:4px 14px}
   @keyframes pulse2{50%{opacity:.4}}
   .back{position:fixed;top:14px;left:14px;z-index:30;color:#8a93a0;text-decoration:none;font-size:13px;
     letter-spacing:.15em;background:rgba(0,0,0,.5);padding:6px 10px;border:1px solid #2a3138}
@@ -63,9 +75,13 @@
 <div class="hud">
   <div id="timer">60</div>
   <div id="subtitle" hidden></div>
-  <div id="brace">BRACE</div>
-  <div id="balwrap"><div class="lbl">BALANCE — STEP TOWARD THE DOT</div>
-    <div id="balgauge"><div id="balring"></div><div id="baldot"></div></div></div>
+  <div id="brace"><div class="big">BRACE</div>
+    <div class="how">the stop throws you FORWARD — keep stepping toward the glowing key</div></div>
+  <div id="balwrap"><div class="lbl" id="ballbl">BALANCE — PRESS THE GLOWING KEY</div>
+    <div id="balgauge"><div id="balring"></div><div id="baldot"></div>
+      <div class="tick" id="tickW">W</div><div class="tick" id="tickA">A</div>
+      <div class="tick" id="tickS">S</div><div class="tick" id="tickD">D</div>
+    </div></div>
 </div>
 <div id="overlay">
   <div class="panel">
@@ -73,7 +89,8 @@
     <p id="ovMsg">You are standing in a subway carriage. Both hands are full of groceries,
     so you cannot hold anything. The driver is having a bad day.<br><br>
     Objective: remain standing for 60 seconds. That is the whole game.</p>
-    <p>WASD shuffle your feet — press TOWARD the drifting dot to stay under yourself<br>
+    <p>WASD shuffle your feet — when the dot drifts, PRESS THE GLOWING KEY to catch yourself<br>
+    (pressing the wrong way tips you over faster — this is realistic and unfair)<br>
     MOUSE look (click locks the cursor) · everything in the carriage has physics · so do you</p>
     <div class="go">CLICK TO BOARD</div>
   </div>
@@ -157,7 +174,7 @@ world.defaultContactMaterial.friction=0.35;
 world.defaultContactMaterial.restitution=0.15;
 const matGround=new CANNON.Material('ground');
 const matShoe=new CANNON.Material('shoe');
-world.addContactMaterial(new CANNON.ContactMaterial(matGround,matShoe,{friction:0.55,restitution:0.0}));
+world.addContactMaterial(new CANNON.ContactMaterial(matGround,matShoe,{friction:0.5,restitution:0.0}));
 
 /* carriage: x -1.3..1.3, z -8..8, floor y=0, ceiling 2.3 */
 const CW=1.3,CL=8,CH=2.3;
@@ -323,7 +340,8 @@ const player=boxBody(0.26,0.875,0.22,75, 0,0.88,0.5, matShoe);
 player.angularDamping=0.5;
 const playerMesh=new THREE.Mesh(new THREE.BoxGeometry(0.52,1.75,0.44),
   new THREE.MeshLambertMaterial({visible:false}));
-const playerE=addDyn(player,playerMesh,'player',{k:2400,d:130,failTilt:1.05,alive:true});
+/* weaker autopilot: YOUR steps supply the missing righting force (see applyBalance) */
+const playerE=addDyn(player,playerMesh,'player',{k:2150,d:118,failTilt:1.05,alive:true});
 
 /* NPCs */
 const npcCfg=[
@@ -482,6 +500,8 @@ addEventListener('mousemove',e=>{
 const upV=new THREE.Vector3(), tmpQ=new THREE.Quaternion();
 const qOffset=new THREE.Quaternion().setFromEuler(new THREE.Euler(0,Math.PI,0));
 const gaugeUp=new CANNON.Vec3(0,1,0),gaugeUpV=new CANNON.Vec3(),gaugeF=new THREE.Vector3();
+const inputDir={x:0,z:0,active:false};
+let shuffleT=0;
 
 /* ================= hud / flow ================= */
 const overlay=document.getElementById('overlay'),ovMsg=document.getElementById('ovMsg');
@@ -553,7 +573,16 @@ function applyBalance(e,dt){
   }
   /* torque steering bodyUp toward world up */
   bodyUp.cross(new CANNON.Vec3(0,1,0),corr);
-  const mag=bal.k*Math.sin(Math.min(tilt,1.2));
+  let mag=bal.k*Math.sin(Math.min(tilt,1.2));
+  /* the player's own steps: pressing toward the lean rights you HARD,
+     pressing away from it actively makes things worse */
+  if(e.kind==='player'&&inputDir.active){
+    const lh=Math.hypot(bodyUp.x,bodyUp.z);
+    if(lh>0.02){
+      const align=(inputDir.x*bodyUp.x+inputDir.z*bodyUp.z)/lh;
+      mag+=2600*Math.max(-0.5,align)*Math.sin(Math.min(tilt,1.2));
+    }
+  }
   b.torque.x+=corr.x*mag-b.angularVelocity.x*bal.d;
   b.torque.y+=-b.angularVelocity.y*bal.d*1.4;
   b.torque.z+=corr.z*mag-b.angularVelocity.z*bal.d;
@@ -584,7 +613,7 @@ function tick(){
 
     /* announcements */
     if(t>47&&!S.announced47){S.announced47=true;chime();
-      say('NEXT STATION — ARRIVING — PLEASE PREPARE',3);
+      say('NEXT STATION — THE BRAKES WILL THROW YOU — READY YOUR FEET',3.4);
       station.visible=true;station.position.z=58}
     if(t>50.2&&!S.braceShown){S.braceShown=true;braceEl.style.display='block';
       setTimeout(()=>braceEl.style.display='none',3200)}
@@ -597,6 +626,7 @@ function tick(){
       e.body.applyForce(new CANNON.Vec3(-a.x*m,0,-a.z*m),e.body.position);
     }
     /* WASD stepping: forces applied at FOOT level so pushing doesn't topple you */
+    inputDir.active=false;
     if(playerE.balance.alive){
       camera.getWorldDirection(forward);forward.y=0;forward.normalize();
       right.crossVectors(forward,new THREE.Vector3(0,1,0));
@@ -608,12 +638,15 @@ function tick(){
       const dl=Math.hypot(dx,dz);
       if(dl>0.01){
         dx/=dl;dz/=dl;
+        inputDir.x=dx;inputDir.z=dz;inputDir.active=true;
         /* fade force out as we reach shuffle speed */
         const along=player.velocity.x*dx+player.velocity.z*dz;
-        const F=560*Math.max(0,1-along/2.2);
+        const F=820*Math.max(0,1-along/3.0);
         const upW=new CANNON.Vec3(0,1,0);player.quaternion.vmult(upW,upW);
         const feet=new CANNON.Vec3(-upW.x*0.8,-upW.y*0.8,-upW.z*0.8);
         player.applyForce(new CANNON.Vec3(dx*F,0,dz*F),feet);
+        shuffleT-=dt;
+        if(shuffleT<=0){shuffleT=0.22;tone(120+Math.random()*40,0.05,'triangle',0.05)}
       }
     }
     /* balance controllers */
@@ -649,6 +682,14 @@ function tick(){
     balDot.style.top=(50-gy*40)+'%';
     balDot.style.background=gm<0.45?'#7dff9b':gm<0.75?'#ffd23f':'#ff5c5c';
     balGauge.classList.toggle('warn',gm>=0.75);
+    /* teach the fix: glow the key that matches the dot, mark what's pressed */
+    const want=gm>0.28?(Math.abs(gx)>Math.abs(gy)?(gx>0?'D':'A'):(gy>0?'W':'S')):null;
+    for(const[k,id]of[['KeyW','tickW'],['KeyA','tickA'],['KeyS','tickS'],['KeyD','tickD']]){
+      const el=document.getElementById(id);
+      el.classList.toggle('want',want===id.slice(4));
+      el.classList.toggle('pressed',!!keys[k]);
+    }
+    document.getElementById('balwrap').classList.toggle('brace',S.braceShown&&!S.finalBrakeDone);
     if(t>=60){
       if(playerE.balance.alive)endWin();
       else{if(S.fellAt==null)S.fellAt=t;endLose()}
