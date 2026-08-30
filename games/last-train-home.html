@@ -452,7 +452,7 @@ function tick(){
     P.slick=0;
     for(const s of slickZones)if(Math.hypot(P.x-s.x,P.z-s.z)<s.r)P.slick=1;
     const cos=Math.cos(P.yaw),sin=Math.sin(P.yaw);
-    const vx=(ix*cos - iz*sin)*speed, vz=(iz*cos + ix*sin)*speed;
+    const vx=(ix*cos + iz*sin)*speed, vz=(iz*cos - ix*sin)*speed;
     if(P.slick){
       P._vx=(P._vx??vx)*0.965+vx*0.035;P._vz=(P._vz??vz)*0.965+vz*0.035;
     }else{P._vx=vx;P._vz=vz}
