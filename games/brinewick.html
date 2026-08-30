@@ -26,6 +26,7 @@
   #freshbar{height:100%;width:100%;background:#7dff9b}
   #coins{position:absolute;top:16px;right:18px;font-size:16px;color:#ffb347;letter-spacing:.1em;
     background:rgba(10,14,16,.5);padding:6px 12px;border:1px solid #3a4448}
+  #vol{position:absolute;top:58px;right:18px;font-size:11px;color:#6a7480;letter-spacing:.15em}
   #subtitle{position:absolute;bottom:18%;left:50%;transform:translateX(-50%);
     max-width:70ch;text-align:center;font-size:17px;letter-spacing:.05em;color:#fff;
     text-shadow:0 2px 8px #000;background:rgba(6,10,12,.6);padding:8px 20px}
@@ -50,7 +51,7 @@
   #overlay .result{font-size:20px;color:#ffb347}
   @keyframes blink{50%{opacity:.2}}
   #vignette{position:fixed;inset:0;pointer-events:none;z-index:5;
-    background:radial-gradient(ellipse at center,transparent 52%,rgba(10,14,15,.55) 100%)}
+    background:radial-gradient(ellipse at center,transparent 68%,rgba(10,14,15,.28) 100%)}
 </style>
 <script type="importmap">
 {"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js"}}
@@ -64,6 +65,7 @@
   <div id="order" hidden></div>
   <div id="compasswrap" hidden><div id="compass">➤</div><div id="dist"></div></div>
   <div id="coins">🪙 0</div>
+  <div id="vol"></div>
   <div id="freshwrap"><div class="lbl">FRESHNESS</div><div id="fresh"><div id="freshbar"></div></div></div>
   <div id="subtitle" hidden></div>
   <div id="prompt" hidden></div>
@@ -76,9 +78,9 @@
     at the pier stall needs legs. Yours will do.<br><br>
     Carry fish to the people of Brinewick while the fish still remember the sea.
     No timer worth fearing. No way to lose. The fog is not hostile, just thorough.</p>
-    <p>WASD walk · MOUSE look (click locks the cursor) · SHIFT jog · E take a parcel<br>
+    <p>WASD walk · MOUSE look (click locks the cursor) · SHIFT jog · E take a parcel or talk<br>
     deliveries hand themselves over when you arrive · mind the edge of the dock<br>
-    your coin purse persists — spend it on gear at Maren's stall (1 / 2 / 3)</p>
+    coins persist — spend them at Maren's stall (1 / 2 / 3) · M cycles volume</p>
     <div class="go">CLICK TO STEP INTO THE MIST</div>
   </div>
 </div>
@@ -86,8 +88,12 @@
 import * as THREE from 'three';
 
 /* ================= audio ================= */
-let AC=null;
+let AC=null,masterG=null;
 function ac(){ if(!AC){ try{AC=new (window.AudioContext||window.webkitAudioContext)()}catch(e){} } return AC }
+function master(a){
+  if(!masterG){masterG=a.createGain();masterG.gain.value=save.vol??1;masterG.connect(a.destination)}
+  return masterG;
+}
 let wavesG=null;
 function initLoops(){
   const a=ac(); if(!a||wavesG) return;
@@ -98,7 +104,7 @@ function initLoops(){
   const src=a.createBufferSource();src.buffer=buf;src.loop=true;
   const lp=a.createBiquadFilter();lp.type='lowpass';lp.frequency.value=420;
   wavesG=a.createGain();wavesG.gain.value=0.16;
-  src.connect(lp).connect(wavesG).connect(a.destination);src.start();
+  src.connect(lp).connect(wavesG).connect(master(a));src.start();
 }
 function tone(f,dur,type='sine',vol=0.08,when=0){
   const a=ac(); if(!a)return;
@@ -106,7 +112,7 @@ function tone(f,dur,type='sine',vol=0.08,when=0){
   o.type=type;o.frequency.value=f;
   g.gain.setValueAtTime(vol,a.currentTime+when);
   g.gain.exponentialRampToValueAtTime(0.0001,a.currentTime+when+dur);
-  o.connect(g).connect(a.destination);o.start(a.currentTime+when);o.stop(a.currentTime+when+dur+0.05);
+  o.connect(g).connect(master(a));o.start(a.currentTime+when);o.stop(a.currentTime+when+dur+0.05);
 }
 function foghorn(){
   const a=ac(); if(!a)return;
@@ -117,7 +123,7 @@ function foghorn(){
   g.gain.exponentialRampToValueAtTime(0.14,a.currentTime+0.7);
   g.gain.setValueAtTime(0.14,a.currentTime+2.0);
   g.gain.exponentialRampToValueAtTime(0.0001,a.currentTime+3.2);
-  o.connect(lp).connect(g).connect(a.destination);o.start();o.stop(a.currentTime+3.4);
+  o.connect(lp).connect(g).connect(master(a));o.start();o.stop(a.currentTime+3.4);
 }
 function gullCry(){
   const a=ac(); if(!a)return;
@@ -131,7 +137,7 @@ function gullCry(){
     g.gain.setValueAtTime(0.0001,t0);
     g.gain.exponentialRampToValueAtTime(0.025,t0+0.04);
     g.gain.exponentialRampToValueAtTime(0.0001,t0+0.25);
-    o.connect(g).connect(a.destination);o.start(t0);o.stop(t0+0.3);
+    o.connect(g).connect(master(a));o.start(t0);o.stop(t0+0.3);
   }
 }
 function chimeGood(){tone(660,.2,'sine',.09);tone(880,.25,'sine',.09,.18);tone(1100,.4,'sine',.08,.36)}
@@ -142,7 +148,7 @@ function splashSfx(){
   const src=a.createBufferSource();src.buffer=buf;
   const f=a.createBiquadFilter();f.type='lowpass';f.frequency.value=900;
   const g=a.createGain();g.gain.value=0.35;
-  src.connect(f).connect(g).connect(a.destination);src.start();
+  src.connect(f).connect(g).connect(master(a));src.start();
 }
 let stepT=0;
 function footstep(onWood){
@@ -157,6 +163,25 @@ const scene=new THREE.Scene();
 const FOGC=0x9aa5a8;
 scene.background=new THREE.Color(FOGC);
 scene.fog=new THREE.FogExp2(FOGC,0.026);
+/* sky dome with a soft gradient so looking up matches the fog at the horizon */
+{
+  const skyGeo=new THREE.SphereGeometry(190,24,16);
+  const pa=skyGeo.attributes.position;
+  const cols=new Float32Array(pa.count*3);
+  const horizon=new THREE.Color(FOGC),zenith=new THREE.Color(0x87939a),below=new THREE.Color(0x828e8f);
+  const tc=new THREE.Color();
+  for(let i=0;i<pa.count;i++){
+    const ny=pa.getY(i)/190;
+    if(ny>=0)tc.copy(horizon).lerp(zenith,Math.min(1,ny*1.6));
+    else tc.copy(horizon).lerp(below,Math.min(1,-ny*2.5));
+    cols[i*3]=tc.r;cols[i*3+1]=tc.g;cols[i*3+2]=tc.b;
+  }
+  skyGeo.setAttribute('color',new THREE.BufferAttribute(cols,3));
+  const sky=new THREE.Mesh(skyGeo,
+    new THREE.MeshBasicMaterial({vertexColors:true,side:THREE.BackSide,fog:false,depthWrite:false}));
+  sky.renderOrder=-1;
+  scene.add(sky);
+}
 const camera=new THREE.PerspectiveCamera(72,2,0.1,300);
 
 scene.add(new THREE.HemisphereLight(0xc5ccce,0x3a4340,0.9));
@@ -238,8 +263,26 @@ const wallTex=makeTex((g,w,h)=>{
   for(let y=0;y<4;y++)for(let x=0;x<4;x++)
     g.strokeRect(x*32+(y%2)*16+.5,y*32+.5,32,32);
 },128,128,30,1);
-const seawall=new THREE.Mesh(new THREE.BoxGeometry(180,1.6,1),lam({map:wallTex}));
-seawall.position.set(0,-0.3,-0.5);scene.add(seawall);
+/* seawall in segments, open at the pier mouths (matches the walkable gaps) */
+{
+  const gaps=[[-32.4,-27.6],[-0.2,4.2],[28.2,31.8]];
+  let x0=-90;
+  const segs=[];
+  for(const[a,b]of gaps){segs.push([x0,a]);x0=b}
+  segs.push([x0,90]);
+  for(const[a,b]of segs){
+    const len=b-a;
+    if(len<=0)continue;
+    const t=wallTex.clone();t.needsUpdate=true;t.repeat.set(len/6,1);
+    const seg=new THREE.Mesh(new THREE.BoxGeometry(len,1.6,1),lam({map:t}));
+    seg.position.set((a+b)/2,-0.3,-0.5);scene.add(seg);
+  }
+  /* bollards flanking each pier mouth */
+  for(const[a,b]of gaps)for(const bx of[a,b]){
+    const bol=new THREE.Mesh(new THREE.CylinderGeometry(0.16,0.2,0.7,7),lam({color:0x2c3134}));
+    bol.position.set(bx,0.35,-0.2);scene.add(bol);
+  }
+}
 
 /* ================= collision + walkable ================= */
 const colliders=[]; // AABB {minX,maxX,minZ,maxZ}
@@ -535,7 +578,8 @@ for(let i=0;i<26;i++){
   const hy=heightAt(x,z);
   if(r<0.4){m=new THREE.Mesh(new THREE.CylinderGeometry(0.35,0.4,0.8,8),lam({color:0x5f4a33}));m.position.y=hy+0.4}
   else if(r<0.7){m=new THREE.Mesh(new THREE.BoxGeometry(0.7,0.6,0.7),lam({color:0x8a734f}));m.position.y=hy+0.3}
-  else{m=new THREE.Mesh(new THREE.BoxGeometry(0.6,0.4,0.6),lam({color:0x3f4a42,wireframe:true}));m.position.y=hy+0.2}
+  else{m=new THREE.Mesh(new THREE.TorusGeometry(0.3,0.1,6,12),lam({color:0x8a734f}));
+    m.rotation.x=-Math.PI/2;m.position.y=hy+0.09} /* coiled rope */
   m.position.x=x;m.position.z=z;m.rotation.y=Math.random()*3;
   scene.add(m);addCollider(x,z,0.8,0.8);
 }
@@ -585,27 +629,42 @@ for(let i=0;i<9;i++){const tx=-50+Math.random()*95,tz=29+Math.random()*10;
 const extraSmoke=[];
 {
   const gray=lam({color:0x8f9189}),dark=lam({color:0x3c3226});
-  /* chapel on the meadow: pale stone, steep roof, little spire */
+  /* chapel on the meadow: pale stone, steep roof, bell tower — entrance faces the town */
   const ch=new THREE.Group();
   const chH=heightAt(-10,38);
-  const body=new THREE.Mesh(new THREE.BoxGeometry(4,3.4,5.6),lam({color:0xcfc9bb}));
-  body.position.y=1.7;ch.add(body);
-  const roof=new THREE.Mesh(new THREE.CylinderGeometry(0.02,Math.SQRT1_2*4*1.18,2.6,4,1),
+  const stone=lam({color:0xcfc9bb});
+  const body=new THREE.Mesh(new THREE.BoxGeometry(5.5,4.6,8.4),stone);
+  body.position.y=2.3;ch.add(body);
+  const roof=new THREE.Mesh(new THREE.CylinderGeometry(0.02,Math.SQRT1_2*5.5*1.18,3.4,4,1),
     lam({color:0x4a4440,flatShading:true}));
-  roof.scale.z=5.6/4;roof.rotation.y=Math.PI/4;roof.position.y=4.7;ch.add(roof);
-  const tower=new THREE.Mesh(new THREE.BoxGeometry(1.3,4.6,1.3),lam({color:0xcfc9bb}));
-  tower.position.set(0,2.3,3.2);ch.add(tower);
-  const spire=new THREE.Mesh(new THREE.ConeGeometry(1.0,2.2,4),lam({color:0x4a4440,flatShading:true}));
-  spire.rotation.y=Math.PI/4;spire.position.set(0,5.7,3.2);ch.add(spire);
-  for(const wz of[-1.4,0,1.4]){
-    const win=new THREE.Mesh(new THREE.BoxGeometry(0.05,1.3,0.5),
+  roof.scale.z=8.4/5.5;roof.rotation.y=Math.PI/4;roof.position.y=6.3;ch.add(roof);
+  const tower=new THREE.Mesh(new THREE.BoxGeometry(2.1,7.2,2.1),stone);
+  tower.position.set(0,3.6,4.6);ch.add(tower);
+  const belfry=new THREE.Mesh(new THREE.BoxGeometry(0.05,0.9,0.7),
+    new THREE.MeshBasicMaterial({color:0x14181d}));
+  for(const s of[-1,1]){const b2=belfry.clone();b2.position.set(s*1.06,6.3,4.6);ch.add(b2)}
+  const bf=new THREE.Mesh(new THREE.BoxGeometry(0.7,0.9,0.05),
+    new THREE.MeshBasicMaterial({color:0x14181d}));
+  bf.position.set(0,6.3,5.66);ch.add(bf);
+  const spire=new THREE.Mesh(new THREE.ConeGeometry(1.7,3.1,4),lam({color:0x4a4440,flatShading:true}));
+  spire.rotation.y=Math.PI/4;spire.position.set(0,8.75,4.6);ch.add(spire);
+  for(const s of[-1,1])for(const wz of[-2.6,-0.9,0.9,2.6]){
+    const win=new THREE.Mesh(new THREE.BoxGeometry(0.05,1.9,0.6),
       new THREE.MeshBasicMaterial({color:0x8fb0c9}));
-    win.position.set(2.02,2,wz);ch.add(win);
+    win.position.set(s*2.77,2.6,wz);ch.add(win);
   }
-  const chDoor=new THREE.Mesh(new THREE.BoxGeometry(1.0,1.9,0.1),dark);
-  chDoor.position.set(0,0.95,3.86);ch.add(chDoor);
+  /* tall arched double door on the tower, plus stone steps */
+  const chDoor=new THREE.Mesh(new THREE.BoxGeometry(1.6,2.6,0.12),dark);
+  chDoor.position.set(0,1.3,5.68);ch.add(chDoor);
+  const arch=new THREE.Mesh(new THREE.CylinderGeometry(0.8,0.8,0.12,10,1,false,0,Math.PI),dark);
+  arch.rotation.x=Math.PI/2;arch.rotation.z=Math.PI;arch.position.set(0,2.6,5.68);ch.add(arch);
+  const seam=new THREE.Mesh(new THREE.BoxGeometry(0.05,2.5,0.13),lam({color:0x2a231c}));
+  seam.position.set(0,1.25,5.7);ch.add(seam);
+  const steps=new THREE.Mesh(new THREE.BoxGeometry(2.4,0.35,1.2),gray);
+  steps.position.set(0,0.12,6.3);ch.add(steps);
+  ch.rotation.y=Math.PI; /* door now faces downhill, toward Brinewick */
   ch.position.set(-10,chH,38);scene.add(ch);
-  addCollider(-10,38,4.4,6);addCollider(-10,41.5,1.7,1.7);
+  addCollider(-10,38,6,8.8);addCollider(-10,33.4,2.5,2.5);
 
   /* smokehouse by the west shore, permanently kippering something */
   const sm=new THREE.Group();
@@ -806,10 +865,14 @@ fence(-44,24,-40.5,24.5);
     const fx=-50+Math.random()*105,fz=6+Math.random()*26;
     if(nearCollider(fx,fz,0.2))continue;
     for(let k=0;k<5;k++){
-      const fl=new THREE.Mesh(new THREE.BoxGeometry(0.08,0.08,0.08),
-        new THREE.MeshBasicMaterial({color:flowerCols[Math.floor(Math.random()*4)]}));
-      fl.position.set(fx+(Math.random()-0.5)*0.9,heightAt(fx,fz)+0.12,fz+(Math.random()-0.5)*0.9);
-      scene.add(fl);
+      const px=fx+(Math.random()-0.5)*0.9,pz=fz+(Math.random()-0.5)*0.9;
+      const hy2=heightAt(px,pz);
+      const stem=new THREE.Mesh(new THREE.CylinderGeometry(0.012,0.016,0.22,4),lam({color:0x5d7a4c}));
+      stem.position.set(px,hy2+0.11,pz);
+      const head=new THREE.Mesh(new THREE.SphereGeometry(0.045,6,5),
+        lam({color:flowerCols[Math.floor(Math.random()*4)]}));
+      head.position.set(px,hy2+0.24,pz);
+      scene.add(stem,head);
     }
   }
 }
@@ -861,6 +924,7 @@ function makeNpc(pos,name,shirtHex){
   const hat=new THREE.Mesh(new THREE.CylinderGeometry(0.23,0.23,0.12,8),lam({color:0x3a4340}));
   hat.position.y=1.85;
   g.add(body,head,hat);
+  g.userData.npcName=name||'';
   if(name){const tag=nameTag(name);tag.position.y=2.25;g.add(tag)}
   /* stand ON the terrain, whatever y the caller thought */
   g.position.set(pos.x,heightAt(pos.x,pos.z),pos.z);
@@ -909,7 +973,7 @@ const P={x:-26,z:6,y:0,yaw:Math.PI/2,pitch:0};
 const keys={};
 let state='menu';
 /* purse and gear persist between visits to Brinewick */
-const save={coins:0,satchel:0,boots:0,horn:false,total:0};
+const save={coins:0,satchel:0,boots:0,horn:false,total:0,vol:1};
 try{Object.assign(save,JSON.parse(localStorage.getItem('brinewick_save'))||{})}catch(e){}
 function persist(){try{localStorage.setItem('brinewick_save',JSON.stringify(save))}catch(e){}}
 let carrying=null,fresh=100,coins=save.coins,delivered=0,ratings=[];
@@ -955,6 +1019,12 @@ const coinsEl=document.getElementById('coins'),subEl=document.getElementById('su
 const promptEl=document.getElementById('prompt'),shopEl=document.getElementById('shop');
 function say(t,dur=3.4){subEl.hidden=false;subEl.textContent=t;subT=dur}
 coinsEl.textContent='🪙 '+coins;
+const volEl=document.getElementById('vol');
+function updateVolLabel(){
+  const n=Math.ceil((save.vol??1)*3);
+  volEl.textContent='VOL '+'▮'.repeat(n)+'▯'.repeat(3-n)+' · M';
+}
+updateVolLabel();
 
 /* ---- Maren's sundries: something to spend the coin on ---- */
 const SHOP=[
@@ -987,6 +1057,50 @@ function buy(it){
   coinsEl.textContent='🪙 '+coins;
   tone(660,.15,'triangle',.08);tone(880,.2,'triangle',.08,.14);
   say(it.field==='horn'?'“Mind where you point that,” says Maren.':'“Sturdy. You look almost professional now.”',3);
+}
+/* ---- talking to the town ---- */
+const CHAT={
+  'MAREN':['“Fog’s thick enough to fillet today.”','“The squid keeps selling. I don’t ask questions.”','“You’re quicker than the last courier. He’s a buoy now. Long story.”'],
+  'TILDA':['“I can hear the sea from here. Well. Obviously.”','“You walk everywhere? In THIS?”'],
+  'BRANN':['“If Doreen asks, I eat kelp and regret.”','“The tide was better in my day.”'],
+  'DOREEN':['“Brann thinks I don’t know about the herring. I know about the herring.”','“Lovely fog today. Thinner than Tuesday’s.”'],
+  'THE PECK TWINS':['“I’m the older twin.” — “By a LIE.”','“We split everything.” — “Except blame.”'],
+  'SIB':['“The boots know things, courier.”','“Don’t step on the cobble that wobbles. It remembers.”'],
+  'FATHER MOSSE':['“The fog is just a cloud being humble.”','“Bless your knees. Couriers need knees.”'],
+  'NAN HOLLOW':['“I’ve outlived four lighthouses.”','“Speak up! Or don’t. The gulls do enough of that.”'],
+  'WEBB':['“The pigeons are ornamental. Legally speaking.”','“You saw nothing. Good lad.”'],
+  'PIP':['“Coo— I mean, hello!”','“Pigeons are just gulls that apologise.”'],
+  'MOLL':['“Stew’s on. Stew’s always on.”','“You look like you could use a sit. Nobody sits anymore.”'],
+  'CRAB JENNY':['“The crabs respect me. It’s mutual and complicated.”','“Smell? What smell.”'],
+  'ELDER SALT':['“In my day the fog was thicker AND politer.”','“Hmph.”'],
+  'MERTA':['“The eel in the name isn’t on the menu. It’s management.”','“Soup of the day is fish. The day never changes.”'],
+  'OLD WICK':['“The lamp turns. I check. That’s the whole job, and it’s enough.”','“On clear nights you can see the next fog coming.”'],
+  'GRETA':['“Furthest house, best air. That’s my theory.”','“The rocks out west sing when the wind’s right. Don’t tell the chapel.”'],
+  'HOLM':['“Anything worth catching, I’ve claimed I caught it.”','“The missus waves from the window. Wave back or we’re both in trouble.”'],
+  "THE SHIP'S CAT":['(a slow blink)','“Mrrp.”','(it looks at the sea, then at you, then back at the sea)']
+};
+const chatIdx={};
+function talkTo(name){
+  const lines=CHAT[name]||['“Fine fog we’re having.”'];
+  const i=(chatIdx[name]??0)%lines.length;
+  chatIdx[name]=i+1;
+  say(`${name} — ${lines[i]}`,4);
+  tone(300+Math.random()*120,.07,'triangle',.05);
+}
+function nearestTalker(){
+  let best=null,bd=6.25; /* within 2.5m */
+  for(const n of npcMeshes){
+    const nm=n.userData.npcName;
+    if(!nm)continue;
+    const d2=(P.x-n.position.x)**2+(P.z-n.position.z)**2;
+    if(d2<bd){bd=d2;best=nm}
+  }
+  const cp=recipients["THE SHIP'S CAT"]&&recipients["THE SHIP'S CAT"].pos;
+  if(cp){
+    const d2=(P.x-cp.x)**2+(P.z-cp.z)**2;
+    if(d2<bd){bd=d2;best="THE SHIP'S CAT"}
+  }
+  return best;
 }
 let scatterT=0;
 function hornBlast(){
@@ -1081,10 +1195,18 @@ addEventListener('mousemove',e=>{
 });
 addEventListener('keydown',e=>{
   keys[e.code]=true;
+  if(e.code==='KeyM'){
+    const steps=[1,0.6,0.3,0];
+    const i=steps.findIndex(v=>Math.abs(v-(save.vol??1))<0.01);
+    save.vol=steps[(i+1)%steps.length];persist();
+    if(masterG)masterG.gain.value=save.vol;
+    updateVolLabel();
+  }
   if(state!=='run')return;
-  if(e.code==='KeyE'&&!carrying){
+  if(e.code==='KeyE'){
     const d=Math.hypot(P.x-STALL_POS.x,P.z-STALL_POS.z);
-    if(d<3.2)newOrder();
+    if(!carrying&&d<3.2)newOrder();
+    else{const who=nearestTalker();if(who)talkTo(who)}
   }
   if(!shopEl.hidden){
     const it=SHOP.find(s=>s.code===e.code);
@@ -1213,6 +1335,10 @@ function tick(){
     if(nearStall!==!shopEl.hidden){shopEl.hidden=!nearStall;if(nearStall)renderShop()}
     promptEl.hidden=!(dStall<3.2&&!carrying);
     if(!promptEl.hidden)promptEl.textContent='E — TAKE THE NEXT PARCEL';
+    else{
+      const who=nearestTalker();
+      if(who){promptEl.hidden=false;promptEl.textContent='E — TALK TO '+who}
+    }
 
     /* fish sway */
     if(handFish.visible){
