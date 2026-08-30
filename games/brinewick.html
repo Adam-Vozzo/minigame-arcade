@@ -32,6 +32,12 @@
   #prompt{position:absolute;bottom:30%;left:50%;transform:translateX(-50%);
     font-size:15px;letter-spacing:.15em;color:#7dff9b;background:rgba(6,10,12,.6);
     padding:6px 16px;border:1px solid #2c4438}
+  #shop{position:absolute;bottom:34px;left:18px;background:rgba(8,12,13,.75);
+    border:1px solid #3a4448;padding:12px 16px;font-size:13px;line-height:1.9;color:#aab6ba}
+  #shop .title{color:#ffb347;letter-spacing:.2em;font-size:12px;margin-bottom:4px}
+  #shop .k{color:#7dff9b}
+  #shop .own{color:#57d7e0}
+  #shop .no{color:#5a6a70}
   .back{position:fixed;top:14px;left:14px;z-index:30;color:#8a93a0;text-decoration:none;font-size:13px;
     letter-spacing:.15em;background:rgba(0,0,0,.5);padding:6px 10px;border:1px solid #2a3138}
   .back:hover{color:#9bd0c8;border-color:#9bd0c8}
@@ -61,6 +67,7 @@
   <div id="freshwrap"><div class="lbl">FRESHNESS</div><div id="fresh"><div id="freshbar"></div></div></div>
   <div id="subtitle" hidden></div>
   <div id="prompt" hidden></div>
+  <div id="shop" hidden></div>
 </div>
 <div id="overlay">
   <div class="panel">
@@ -69,8 +76,9 @@
     at the pier stall needs legs. Yours will do.<br><br>
     Carry fish to the people of Brinewick while the fish still remember the sea.
     No timer worth fearing. No way to lose. The fog is not hostile, just thorough.</p>
-    <p>WASD walk · MOUSE look · SHIFT jog · E take the parcel at the stall<br>
-    deliveries hand themselves over when you arrive · mind the edge of the dock</p>
+    <p>WASD walk · MOUSE look (click locks the cursor) · SHIFT jog · E take a parcel<br>
+    deliveries hand themselves over when you arrive · mind the edge of the dock<br>
+    your coin purse persists — spend it on gear at Maren's stall (1 / 2 / 3)</p>
     <div class="go">CLICK TO STEP INTO THE MIST</div>
   </div>
 </div>
@@ -165,7 +173,15 @@ function makeTex(draw,w=128,h=128,rx=1,ry=1){
 }
 const lam=(o)=>new THREE.MeshLambertMaterial(o);
 
-/* ground: cobbles near shore fading to grass */
+/* ---- terrain: flat harbour front, terraced back lanes, lighthouse knoll ---- */
+function sstep(a,b,v){const t=Math.max(0,Math.min(1,(v-a)/(b-a)));return t*t*(3-2*t)}
+function heightAt(x,z){
+  if(z<=0.5)return 0;
+  let h=2.1*sstep(16,26,z)+1.7*sstep(34,46,z);
+  h+=2.4*Math.exp(-(((x-62)**2)/110+((z-5)**2)/70))*sstep(0.5,2.5,z);
+  return h;
+}
+/* ground: cobbles near shore fading to grass uphill */
 const cobbleTex=makeTex((g,w,h)=>{
   g.fillStyle='#5c5f5c';g.fillRect(0,0,w,h);
   for(let i=0;i<90;i++){
@@ -175,8 +191,26 @@ const cobbleTex=makeTex((g,w,h)=>{
     g.beginPath();g.ellipse(x,y,r,r*0.8,0,0,7);g.fill();
   }
 },128,128,40,26);
-const ground=new THREE.Mesh(new THREE.PlaneGeometry(180,110),lam({map:cobbleTex}));
-ground.rotation.x=-Math.PI/2;ground.position.set(0,0,55);scene.add(ground);
+const groundGeo=new THREE.PlaneGeometry(180,110,90,55);
+groundGeo.rotateX(-Math.PI/2);
+{
+  const pa=groundGeo.attributes.position;
+  const colors=new Float32Array(pa.count*3);
+  const stone=new THREE.Color(0xffffff),grass=new THREE.Color(0x7fa065);
+  const tc=new THREE.Color();
+  for(let i=0;i<pa.count;i++){
+    const gx=pa.getX(i),gz=pa.getZ(i)+55;
+    const h=heightAt(gx,gz);
+    pa.setY(i,h);
+    const gAmt=Math.max(0,Math.min(1,h/2.4+(gz-14)/45));
+    tc.copy(stone).lerp(grass,gAmt*0.85);
+    colors[i*3]=tc.r;colors[i*3+1]=tc.g;colors[i*3+2]=tc.b;
+  }
+  groundGeo.setAttribute('color',new THREE.BufferAttribute(colors,3));
+  groundGeo.computeVertexNormals();
+}
+const ground=new THREE.Mesh(groundGeo,lam({map:cobbleTex,vertexColors:true}));
+ground.position.set(0,0,55);scene.add(ground);
 
 /* water */
 const waterTex=makeTex((g,w,h)=>{
@@ -274,14 +308,15 @@ function cottage(x,z,rotY,w,d,h,ci,name){
   }
   const sideWin=new THREE.Mesh(new THREE.BoxGeometry(0.06,0.7,0.6),Math.random()<0.6?windowMat:windowDim);
   sideWin.position.set(w/2+0.04,1.4,0);g.add(sideWin);
-  g.position.set(x,0,z);g.rotation.y=rotY;
+  const hh=heightAt(x,z);
+  g.position.set(x,hh,z);g.rotation.y=rotY;
   scene.add(g);
   /* axis-aligned enough: use rotated footprint bounds (rotY is multiple of small angles; use max extent) */
   const ex=(Math.abs(Math.cos(rotY))*w+Math.abs(Math.sin(rotY))*d)/2;
   const ez=(Math.abs(Math.sin(rotY))*w+Math.abs(Math.cos(rotY))*d)/2;
   addCollider(x,z,ex*2,ez*2);
-  const doorWorld=new THREE.Vector3(-w*0.22,0,d/2+1.2).applyAxisAngle(new THREE.Vector3(0,1,0),rotY).add(new THREE.Vector3(x,0,z));
-  buildings.push({x,z,name,door:doorWorld,chimney:new THREE.Vector3(w*0.25,h+h*0.9,0).applyAxisAngle(new THREE.Vector3(0,1,0),rotY).add(new THREE.Vector3(x,0,z))});
+  const doorWorld=new THREE.Vector3(-w*0.22,0,d/2+1.2).applyAxisAngle(new THREE.Vector3(0,1,0),rotY).add(new THREE.Vector3(x,hh,z));
+  buildings.push({x,z,name,door:doorWorld,chimney:new THREE.Vector3(w*0.25,h+h*0.9,0).applyAxisAngle(new THREE.Vector3(0,1,0),rotY).add(new THREE.Vector3(x,hh,z))});
   return g;
 }
 /* the village */
@@ -324,10 +359,10 @@ const lighthouse=new THREE.Group();
   const lampM=new THREE.Mesh(new THREE.SphereGeometry(0.55,10,10),
     new THREE.MeshBasicMaterial({color:0xfff2c8}));
   lampM.position.y=10.4;lighthouse.add(lampM);
-  lighthouse.position.set(62,0,4);
+  lighthouse.position.set(62,heightAt(62,4),4);
   scene.add(lighthouse);
   addCollider(62,4,10,10);
-  buildings.push({x:62,z:4,name:'OLD WICK',door:new THREE.Vector3(57,0,6),chimney:null});
+  buildings.push({x:62,z:4,name:'OLD WICK',door:new THREE.Vector3(57,heightAt(57,6),6),chimney:null});
 }
 /* rotating beam */
 const beam=new THREE.Mesh(new THREE.ConeGeometry(3.2,26,10,1,true),
@@ -335,7 +370,7 @@ const beam=new THREE.Mesh(new THREE.ConeGeometry(3.2,26,10,1,true),
     depthWrite:false,fog:false}));
 beam.rotation.z=Math.PI/2;
 const beamPivot=new THREE.Group();
-beamPivot.position.set(62,10.4,4);
+beamPivot.position.set(62,10.4+heightAt(62,4),4);
 beam.position.x=13;
 beamPivot.add(beam);scene.add(beamPivot);
 
@@ -399,6 +434,7 @@ rowboat(34,-8,0.4);rowboat(36.5,-11,2.5);rowboat(-36,-9,1.2);
 const lampPts=[[-42,6],[-30,7.5],[-14,6],[2,6.5],[18,6],[34,6.5],[48,10],[-30,20],[4,22],[26,21]];
 lampPts.forEach((lp,i)=>{
   const g=new THREE.Group();
+  const hy=heightAt(lp[0],lp[1]);
   const post=new THREE.Mesh(new THREE.CylinderGeometry(0.07,0.1,3.2,6),lam({color:0x2c3134}));
   post.position.y=1.6;g.add(post);
   const arm=new THREE.Mesh(new THREE.BoxGeometry(0.5,0.07,0.07),lam({color:0x2c3134}));
@@ -406,10 +442,10 @@ lampPts.forEach((lp,i)=>{
   const lampM=new THREE.Mesh(new THREE.SphereGeometry(0.16,8,8),
     new THREE.MeshBasicMaterial({color:0xffe9b0}));
   lampM.position.set(0.42,3.0,0);g.add(lampM);
-  g.position.set(lp[0],0,lp[1]);scene.add(g);
+  g.position.set(lp[0],hy,lp[1]);scene.add(g);
   if(i%2===0){
     const l=new THREE.PointLight(0xffd98a,7,13,1.8);
-    l.position.set(lp[0]+0.42,3,lp[1]);scene.add(l);
+    l.position.set(lp[0]+0.42,hy+3,lp[1]);scene.add(l);
   }
   addCollider(lp[0],lp[1],0.3,0.3);
 });
@@ -419,12 +455,52 @@ for(let i=0;i<26;i++){
   if(Math.hypot(x-(-30),z-4)<4||Math.hypot(x-62,z-4)<9)continue;
   let m;
   const r=Math.random();
-  if(r<0.4){m=new THREE.Mesh(new THREE.CylinderGeometry(0.35,0.4,0.8,8),lam({color:0x5f4a33}));m.position.y=0.4}
-  else if(r<0.7){m=new THREE.Mesh(new THREE.BoxGeometry(0.7,0.6,0.7),lam({color:0x8a734f}));m.position.y=0.3}
-  else{m=new THREE.Mesh(new THREE.BoxGeometry(0.6,0.4,0.6),lam({color:0x3f4a42,wireframe:true}));m.position.y=0.2}
+  const hy=heightAt(x,z);
+  if(r<0.4){m=new THREE.Mesh(new THREE.CylinderGeometry(0.35,0.4,0.8,8),lam({color:0x5f4a33}));m.position.y=hy+0.4}
+  else if(r<0.7){m=new THREE.Mesh(new THREE.BoxGeometry(0.7,0.6,0.7),lam({color:0x8a734f}));m.position.y=hy+0.3}
+  else{m=new THREE.Mesh(new THREE.BoxGeometry(0.6,0.4,0.6),lam({color:0x3f4a42,wireframe:true}));m.position.y=hy+0.2}
   m.position.x=x;m.position.z=z;m.rotation.y=Math.random()*3;
   scene.add(m);addCollider(x,z,0.8,0.8);
 }
+
+/* terrace retaining walls with path gaps between them */
+for(const[wx0,wx1]of[[-50,-32],[-18,2],[14,34]]){
+  const len=wx1-wx0,cx=(wx0+wx1)/2;
+  const wallSeg=new THREE.Mesh(new THREE.BoxGeometry(len,1.1,0.6),lam({color:0x6a6d66}));
+  wallSeg.position.set(cx,heightAt(cx,21)+0.3,21);
+  scene.add(wallSeg);addCollider(cx,21,len,0.9);
+}
+
+/* ---- natural edges: headland rocks and a treeline instead of invisible walls ---- */
+const rockGeo=new THREE.DodecahedronGeometry(1,0);
+function rock(x,z,s){
+  const m=new THREE.Mesh(rockGeo,lam({color:0x65685f,flatShading:true}));
+  m.position.set(x,heightAt(x,z)+s*0.3,z);
+  m.scale.set(s*(0.8+Math.random()*0.5),s*(0.55+Math.random()*0.5),s*(0.8+Math.random()*0.5));
+  m.rotation.set(Math.random(),Math.random()*3,Math.random());
+  scene.add(m);
+}
+for(let i=0;i<11;i++)rock(-58-Math.random()*9,-3+i*4.6+Math.random()*2,2.2+Math.random()*1.9);
+for(let i=0;i<9;i++)rock(73+Math.random()*7,-3+i*5+Math.random()*3,2.4+Math.random()*2);
+for(let i=0;i<13;i++)rock(-58+i*11+Math.random()*5,47+Math.random()*4,1.7+Math.random()*1.7);
+addCollider(-61,22,10,54); // west headland
+addCollider(77,20,12,50);  // east headland
+addCollider(8,49,150,9);   // back ridge
+const trunkG=new THREE.CylinderGeometry(0.12,0.16,1.1,5);
+const conG=new THREE.ConeGeometry(1.15,2.6,6);
+function tree(tx,tz){
+  const hh2=heightAt(tx,tz);
+  const trunk=new THREE.Mesh(trunkG,lam({color:0x4a3b2c}));
+  trunk.position.set(tx,hh2+0.5,tz);
+  const con=new THREE.Mesh(conG,
+    lam({color:new THREE.Color().setHSL(0.34,0.28,0.15+Math.random()*0.07).getHex(),flatShading:true}));
+  con.position.set(tx,hh2+2.2,tz);
+  con.scale.setScalar(0.8+Math.random()*0.6);
+  scene.add(trunk,con);
+}
+for(let i=0;i<32;i++)tree(-58+Math.random()*128,41.5+Math.random()*8);
+for(let i=0;i<9;i++){const tx=-50+Math.random()*95,tz=29+Math.random()*10;
+  if(Math.abs(tx+24)>4&&Math.abs(tx-14)>4)tree(tx,tz)}
 
 /* chimney smoke */
 const smokes=[];
@@ -448,7 +524,8 @@ for(let i=0;i<5;i++){
   const wr=new THREE.Mesh(wingGeo,mat);wr.position.x=0.45;
   g.add(wl,wr);scene.add(g);
   gulls.push({g,wl,wr,cx:-20+Math.random()*60,cz:-6+Math.random()*20,
-    r:8+Math.random()*14,h:7+Math.random()*6,sp:0.3+Math.random()*0.4,ph:Math.random()*6});
+    r:8+Math.random()*14,h:7+Math.random()*6,sp:0.3+Math.random()*0.4,
+    ph:Math.random()*6,ang:Math.random()*6});
 }
 
 /* NPCs at doors */
@@ -489,7 +566,11 @@ const maren=makeNpc(new THREE.Vector3(-31.8,0,4.6),'MAREN',0x6d3a3a);
 const P={x:-26,z:6,y:0,yaw:Math.PI/2,pitch:0};
 const keys={};
 let state='menu';
-let carrying=null,fresh=100,coins=0,delivered=0,ratings=[];
+/* purse and gear persist between visits to Brinewick */
+const save={coins:0,satchel:0,boots:0,horn:false,total:0};
+try{Object.assign(save,JSON.parse(localStorage.getItem('brinewick_save'))||{})}catch(e){}
+function persist(){try{localStorage.setItem('brinewick_save',JSON.stringify(save))}catch(e){}}
+let carrying=null,fresh=100,coins=save.coins,delivered=0,ratings=[];
 let subT=0,bobT=0;
 const FISH=['MACKEREL','COD','HERRING','EEL','HADDOCK','SOLE','A SUSPICIOUS SQUID','KIPPERS'];
 const HINTS={
@@ -526,8 +607,48 @@ const orderEl=document.getElementById('order'),compWrap=document.getElementById(
 const compEl=document.getElementById('compass'),distEl=document.getElementById('dist');
 const freshWrap=document.getElementById('freshwrap'),freshBar=document.getElementById('freshbar');
 const coinsEl=document.getElementById('coins'),subEl=document.getElementById('subtitle');
-const promptEl=document.getElementById('prompt');
+const promptEl=document.getElementById('prompt'),shopEl=document.getElementById('shop');
 function say(t,dur=3.4){subEl.hidden=false;subEl.textContent=t;subT=dur}
+coinsEl.textContent='🪙 '+coins;
+
+/* ---- Maren's sundries: something to spend the coin on ---- */
+const SHOP=[
+  {code:'Digit1',key:'1',name:'WAXED SATCHEL',field:'satchel',max:3,
+   cost:l=>10+l*10,desc:'fish forgets the sea slower'},
+  {code:'Digit2',key:'2',name:'DOCK BOOTS',field:'boots',max:3,
+   cost:l=>8+l*8,desc:'brisker on the cobbles'},
+  {code:'Digit3',key:'3',name:'BRASS FOGHORN',field:'horn',max:1,
+   cost:()=>25,desc:'press H · the gulls will hear about it'},
+];
+function renderShop(){
+  let html='<div class="title">MAREN\'S SUNDRIES</div>';
+  for(const it of SHOP){
+    const lv=it.field==='horn'?(save.horn?1:0):save[it.field];
+    const owned=lv>=it.max;
+    html+=owned
+      ?`<div><span class="own">[✓] ${it.name}</span> — ${it.desc}</div>`
+      :`<div><span class="k">[${it.key}]</span> ${it.name} ${it.max>1?`(${lv}/${it.max})`:''} — ${it.cost(lv)}c <span class="no">· ${it.desc}</span></div>`;
+  }
+  shopEl.innerHTML=html;
+}
+function buy(it){
+  const lv=it.field==='horn'?(save.horn?1:0):save[it.field];
+  if(lv>=it.max)return;
+  const price=it.cost(lv);
+  if(coins<price){tone(180,.2,'sawtooth',.06);say('Maren counts your coins and shakes her head kindly.',2.6);return}
+  coins-=price;save.coins=coins;
+  if(it.field==='horn')save.horn=true;else save[it.field]=lv+1;
+  persist();renderShop();
+  coinsEl.textContent='🪙 '+coins;
+  tone(660,.15,'triangle',.08);tone(880,.2,'triangle',.08,.14);
+  say(it.field==='horn'?'“Mind where you point that,” says Maren.':'“Sturdy. You look almost professional now.”',3);
+}
+let scatterT=0;
+function hornBlast(){
+  foghorn();scatterT=5;
+  gullCry();setTimeout(gullCry,600);
+  say('The gulls have opinions about this.',2.6);
+}
 
 /* fish in hand (attached to camera) */
 const handFish=new THREE.Group();
@@ -545,9 +666,9 @@ const handFish=new THREE.Group();
     new THREE.MeshLambertMaterial({color:0xcfc4a8}));
   paper.position.set(0.05,-0.07,0);
   handFish.add(bodyF,tail,eye,paper);
-  handFish.position.set(0.4,-0.36,-0.75);
+  handFish.position.set(0.46,-0.4,-0.95);
   handFish.rotation.set(0.2,-0.5,0.15);
-  handFish.scale.setScalar(0.55);
+  handFish.scale.setScalar(0.38);
   handFish.visible=false;
   camera.add(handFish);
 }
@@ -567,6 +688,7 @@ function deliver(){
   const rating=Math.max(0,Math.round(fresh));
   const pay=3+Math.round(fresh/20);
   coins+=pay;delivered++;ratings.push(rating);
+  save.coins=coins;save.total++;persist();
   coinsEl.textContent='🪙 '+coins;
   const line=(LINES[carrying.name]||'“Much obliged.”').replace('%F',carrying.fish.toLowerCase());
   const grade=rating>70?'still flapping!':rating>35?'perfectly acceptable':'…the cat gets this one';
@@ -593,12 +715,16 @@ overlay.addEventListener('click',()=>{
   overlay.style.display='none';
   state='run';
   if(delivered===0&&!carrying)say('Find MAREN at the stall by the long pier — press E to take a parcel.',4.5);
-  canvas.requestPointerLock?.call(canvas)?.catch?.(()=>{});
+  lockPointer();
 });
 
 /* input */
 let pointerLocked=false;
+function lockPointer(){
+  try{const r=canvas.requestPointerLock();r&&r.catch&&r.catch(()=>{})}catch(e){}
+}
 document.addEventListener('pointerlockchange',()=>{pointerLocked=document.pointerLockElement===canvas});
+canvas.addEventListener('click',()=>{if(state==='run'&&!pointerLocked)lockPointer()});
 addEventListener('mousemove',e=>{
   if(pointerLocked){
     P.yaw-=e.movementX*0.0022;
@@ -610,10 +736,16 @@ addEventListener('mousemove',e=>{
 });
 addEventListener('keydown',e=>{
   keys[e.code]=true;
-  if(e.code==='KeyE'&&state==='run'&&!carrying){
+  if(state!=='run')return;
+  if(e.code==='KeyE'&&!carrying){
     const d=Math.hypot(P.x-STALL_POS.x,P.z-STALL_POS.z);
     if(d<3.2)newOrder();
   }
+  if(!shopEl.hidden){
+    const it=SHOP.find(s=>s.code===e.code);
+    if(it)buy(it);
+  }
+  if(e.code==='KeyH'&&save.horn&&scatterT<=0)hornBlast();
 });
 addEventListener('keyup',e=>keys[e.code]=false);
 
@@ -628,7 +760,8 @@ function collide(){
       else if(m===dz1)P.z=c.maxZ+r;else P.z=c.minZ-r;
     }
   }
-  if(P.x>86)P.x=86;if(P.x<-86)P.x=-86;if(P.z>105)P.z=105;
+  /* backup clamps behind the physical rock/tree boundaries */
+  if(P.x>80)P.x=80;if(P.x<-66)P.x=-66;if(P.z>52)P.z=52;
 }
 function fallInWater(){
   splashSfx();
@@ -678,11 +811,15 @@ function tick(){
     }
     s.pts.geometry.attributes.position.needsUpdate=true;
   }
+  scatterT=Math.max(0,scatterT-dt);
+  const scat=Math.min(scatterT,1);
   for(const gu of gulls){
-    const a=t*gu.sp+gu.ph;
-    gu.g.position.set(gu.cx+Math.cos(a)*gu.r,gu.h+Math.sin(t*0.7+gu.ph)*0.8,gu.cz+Math.sin(a)*gu.r);
-    gu.g.rotation.y=-a-Math.PI/2;
-    const flap=Math.sin(t*7+gu.ph)*0.5;
+    gu.ang+=gu.sp*(1+scat*2.5)*dt;
+    const effR=gu.r*(1+scat*1.4),effH=gu.h+scat*4;
+    gu.g.position.set(gu.cx+Math.cos(gu.ang)*effR,
+      effH+Math.sin(t*0.7+gu.ph)*0.8,gu.cz+Math.sin(gu.ang)*effR);
+    gu.g.rotation.y=-gu.ang-Math.PI/2;
+    const flap=Math.sin(t*(7+scat*6)+gu.ph)*0.5;
     gu.wl.rotation.z=flap*0.6;gu.wr.rotation.z=-flap*0.6;
   }
   if(state==='run'){
@@ -697,7 +834,7 @@ function tick(){
     if(keys.KeyA)ix-=1;if(keys.KeyD)ix+=1;
     const len=Math.hypot(ix,iz)||1;ix/=len;iz/=len;
     const jog=keys.ShiftLeft;
-    const speed=jog?5.2:3.1;
+    const speed=(jog?5.2:3.1)*(1+0.1*save.boots);
     const cos=Math.cos(P.yaw),sin=Math.sin(P.yaw);
     P.x+=(ix*cos+iz*sin)*speed*dt;
     P.z+=(iz*cos-ix*sin)*speed*dt;
@@ -712,7 +849,7 @@ function tick(){
 
     /* freshness */
     if(carrying){
-      fresh=Math.max(0,fresh-dt*(100/95));
+      fresh=Math.max(0,fresh-dt*(100/95)*Math.pow(0.82,save.satchel));
       freshBar.style.width=fresh+'%';
       freshBar.style.background=fresh>55?'#7dff9b':fresh>25?'#ffd23f':'#ff5c5c';
       /* compass: signed angle from camera forward to the target */
@@ -723,12 +860,13 @@ function tick(){
       compEl.style.transform=`rotate(${(-rel*57.2958)-90}deg)`;
       distEl.textContent=Math.round(d)+'m';
       if(d<2.4)deliver();
-    }else{
-      const d=Math.hypot(P.x-STALL_POS.x,P.z-STALL_POS.z);
-      promptEl.hidden=!(d<3.2);
-      if(d<3.2)promptEl.textContent='E — TAKE THE NEXT PARCEL';
     }
-    if(carrying)promptEl.hidden=true;
+    /* stall proximity: parcel prompt + shop panel */
+    const dStall=Math.hypot(P.x-STALL_POS.x,P.z-STALL_POS.z);
+    const nearStall=dStall<4.2;
+    if(nearStall!==!shopEl.hidden){shopEl.hidden=!nearStall;if(nearStall)renderShop()}
+    promptEl.hidden=!(dStall<3.2&&!carrying);
+    if(!promptEl.hidden)promptEl.textContent='E — TAKE THE NEXT PARCEL';
 
     /* fish sway */
     if(handFish.visible){
@@ -745,7 +883,8 @@ function tick(){
 
   /* camera */
   const bob=(state==='run')?Math.sin(bobT)*0.045:0;
-  camera.position.set(P.x,1.62+bob,P.z);
+  const eyeY=heightAt(P.x,P.z)+1.62+bob;
+  camera.position.set(P.x,camera.position.y+(eyeY-camera.position.y)*Math.min(1,dt*10),P.z);
   camera.rotation.order='YXZ';
   camera.rotation.y=P.yaw;camera.rotation.x=P.pitch;
 

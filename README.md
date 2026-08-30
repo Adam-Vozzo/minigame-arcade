@@ -8,7 +8,7 @@ three.js from a CDN. Made to be hosted on GitHub Pages.
 | # | Game | Pitch |
 |---|------|-------|
 | 01 | [Last Train Home](games/last-train-home.html) | First-person sprint through a tiny station before the doors close. Obstacles reshuffle every attempt. |
-| 02 | [Sword With Too Much Momentum](games/sword-momentum.html) | Your mouse holds the hilt of an extremely heavy sword. Fit it through the openings. Don't hit the walls. |
+| 02 | [Sword With Too Much Momentum](games/sword-momentum.html) | Top-down dungeon crawler. Your mouse swings a sword three times your weight, and its momentum drags your knight around. Slay monsters, smash crates, descend. |
 | 03 | [Stay On The Train](games/stay-on-the-train.html) | Remain standing in a violently moving subway carriage for 60 seconds. Everything has physics. PS1 visuals. Brace for the final stop. |
 | 04 | [Squish Circuit](games/squish-circuit.html) | Time-trial racing as a squishy jelly ball. Tilt the whole world to roll around a neon sky-circuit; boost pads, sector splits, best lap saved locally. |
 | 05 | [Brinewick](games/brinewick.html) | A misty seaside dock village. Open-world fish deliveries: take a parcel from the pier stall, find the recipient, keep it fresh. Foghorns, gulls, no fail state. |

@@ -307,7 +307,9 @@ function say(t,dur=2.4){subEl.hidden=false;subEl.textContent=t;subTimer=dur}
 
 function resetRun(){
   P.x=0;P.z=2;P.y=0;P.vy=0;P.yaw=0;P.pitch=0;P.stam=100;P.stumble=0;P.slick=0;
+  P._vx=0;P._vz=0;
   tLeft=22;doorOpen=1;announced=false;
+  flashEl.style.opacity=0;
   doorL.position.z=DOOR_Z-0.85;doorR.position.z=DOOR_Z+0.85;
   train.position.z=0;doorGlow.visible=true;
   buildLayout();
@@ -393,6 +395,7 @@ function lose(msg){
   setTimeout(showEnd,2600);
 }
 function showEnd(){
+  document.exitPointerLock?.(); // free the cursor so the overlay is clickable
   overlay.style.display='flex';
   const h=overlay.querySelector('h1');
   if(state==='win'){
@@ -486,7 +489,7 @@ function tick(){
     doorR.position.z=DOOR_Z+0.85*Math.max(doorOpen,0.07);
     if(winT>0.8)train.position.z-=winT*winT*2*dt*10;
     P.z+= (train.position.z+DOOR_Z-P.z)*dt*3;
-    flashEl.style.opacity=Math.max(0,winT-1)*0.5;
+    flashEl.style.opacity=Math.min(0.7,Math.max(0,winT-1)*0.5);
   }
   if(state==='lose'){
     loseT+=dt;

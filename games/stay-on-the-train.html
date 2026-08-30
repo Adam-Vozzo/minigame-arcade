@@ -19,10 +19,17 @@
     font-size:44px;color:#57d7e0;text-shadow:0 0 14px rgba(87,215,224,.5);font-weight:bold}
   #timer.danger{color:#ff5c5c;animation:pulse .4s infinite}
   @keyframes pulse{50%{transform:translateX(-50%) scale(1.15)}}
-  #balwrap{position:absolute;bottom:30px;left:50%;transform:translateX(-50%);width:240px}
-  #balwrap .lbl{font-size:10px;letter-spacing:.25em;color:#6a7480;text-align:center;margin-bottom:4px}
-  #balance{height:12px;border:1px solid #6a7480;background:rgba(0,0,0,.4)}
-  #balbar{height:100%;width:0%;background:#7dff9b}
+  #balwrap{position:absolute;bottom:26px;left:50%;transform:translateX(-50%);text-align:center}
+  #balwrap .lbl{font-size:10px;letter-spacing:.25em;color:#6a7480;margin-bottom:5px}
+  #balgauge{position:relative;width:104px;height:104px;margin:0 auto;border-radius:50%;
+    border:2px solid #5a6a70;background:rgba(0,0,0,.42)}
+  #balgauge.warn{border-color:#ff5c5c;box-shadow:0 0 14px rgba(255,92,92,.5)}
+  #balgauge::before,#balgauge::after{content:"";position:absolute;background:#3a4448}
+  #balgauge::before{left:50%;top:6%;bottom:6%;width:1px}
+  #balgauge::after{top:50%;left:6%;right:6%;height:1px}
+  #balring{position:absolute;inset:14%;border-radius:50%;border:1px dashed #3a4448}
+  #baldot{position:absolute;width:16px;height:16px;border-radius:50%;background:#7dff9b;
+    left:50%;top:50%;transform:translate(-50%,-50%);box-shadow:0 0 10px rgba(125,255,155,.6)}
   #subtitle{position:absolute;bottom:22%;left:50%;transform:translateX(-50%);
     font-size:19px;letter-spacing:.14em;color:#ffe9a8;text-shadow:0 2px 8px #000;
     background:rgba(0,0,0,.5);padding:6px 18px;white-space:nowrap}
@@ -57,7 +64,8 @@
   <div id="timer">60</div>
   <div id="subtitle" hidden></div>
   <div id="brace">BRACE</div>
-  <div id="balwrap"><div class="lbl">BALANCE</div><div id="balance"><div id="balbar"></div></div></div>
+  <div id="balwrap"><div class="lbl">BALANCE — STEP TOWARD THE DOT</div>
+    <div id="balgauge"><div id="balring"></div><div id="baldot"></div></div></div>
 </div>
 <div id="overlay">
   <div class="panel">
@@ -65,8 +73,8 @@
     <p id="ovMsg">You are standing in a subway carriage. Both hands are full of groceries,
     so you cannot hold anything. The driver is having a bad day.<br><br>
     Objective: remain standing for 60 seconds. That is the whole game.</p>
-    <p>WASD shuffle your feet to stay under yourself · MOUSE glance around<br>
-    everything in the carriage has physics · so do you</p>
+    <p>WASD shuffle your feet — press TOWARD the drifting dot to stay under yourself<br>
+    MOUSE look (click locks the cursor) · everything in the carriage has physics · so do you</p>
     <div class="go">CLICK TO BOARD</div>
   </div>
 </div>
@@ -456,22 +464,35 @@ const keys={};
 addEventListener('keydown',e=>{keys[e.code]=true;if(e.code==='Space')e.preventDefault()});
 addEventListener('keyup',e=>keys[e.code]=false);
 const mouse={x:0,y:0};
+let pointerLocked=false,lookYaw=0,lookPitch=0;
+function lockPointer(){
+  try{const r=canvas.requestPointerLock();r&&r.catch&&r.catch(()=>{})}catch(e){}
+}
+document.addEventListener('pointerlockchange',()=>{pointerLocked=document.pointerLockElement===canvas});
+canvas.addEventListener('click',()=>{if(state==='run'&&!pointerLocked)lockPointer()});
 addEventListener('mousemove',e=>{
-  mouse.x=e.clientX/innerWidth-0.5;
-  mouse.y=e.clientY/innerHeight-0.5;
+  if(pointerLocked){
+    lookYaw-=e.movementX*0.0022;
+    lookPitch=Math.max(-1.15,Math.min(1.15,lookPitch-e.movementY*0.0022));
+  }else{
+    mouse.x=e.clientX/innerWidth-0.5;
+    mouse.y=e.clientY/innerHeight-0.5;
+  }
 });
 const upV=new THREE.Vector3(), tmpQ=new THREE.Quaternion();
 const qOffset=new THREE.Quaternion().setFromEuler(new THREE.Euler(0,Math.PI,0));
+const gaugeUp=new CANNON.Vec3(0,1,0),gaugeUpV=new CANNON.Vec3(),gaugeF=new THREE.Vector3();
 
 /* ================= hud / flow ================= */
 const overlay=document.getElementById('overlay'),ovMsg=document.getElementById('ovMsg');
-const timerEl=document.getElementById('timer'),balBar=document.getElementById('balbar');
+const timerEl=document.getElementById('timer');
+const balDot=document.getElementById('baldot'),balGauge=document.getElementById('balgauge');
 const subEl=document.getElementById('subtitle'),braceEl=document.getElementById('brace');
 let subT=0;
 function say(t,dur=2.6){subEl.hidden=false;subEl.textContent=t;subT=dur}
 overlay.addEventListener('click',()=>{
   ac();initLoops();
-  if(S.state==='menu'){start()}else{location.reload()}
+  if(S.state==='menu'){start();lockPointer()}else{location.reload()}
 });
 function start(){
   S.state='run';S.t=0;overlay.style.display='none';
@@ -486,6 +507,7 @@ function countStats(){
 }
 function endWin(){
   S.state='won';
+  document.exitPointerLock?.();
   const{moved,down}=countStats();
   overlay.querySelector('h1').textContent='YOU ARRIVED WITH DIGNITY';
   overlay.querySelector('h1').style.color='#7dff9b';
@@ -497,6 +519,7 @@ function endWin(){
 }
 function endLose(){
   S.state='lost';
+  document.exitPointerLock?.();
   const{moved,down}=countStats();
   overlay.querySelector('h1').textContent='YOU FELL';
   overlay.querySelector('h1').style.color='#ff5c5c';
@@ -600,13 +623,32 @@ function tick(){
 
     world.step(1/60,dt,3);
 
+    /* safety net: if the solver ever flings the player out of the carriage, put them back */
+    const pp=player.position;
+    if(Math.abs(pp.x)>2.0||Math.abs(pp.z)>8.8||pp.y<-0.5||pp.y>3.2){
+      pp.set(0,1.0,0.5);
+      player.velocity.set(0,0,0);player.angularVelocity.set(0,0,0);
+      player.quaternion.set(0,0,0,1);
+    }
+
     /* hud */
     const left=Math.max(0,60-t);
     timerEl.textContent=Math.ceil(left);
     timerEl.classList.toggle('danger',left<13);
-    const bal=Math.min(playerTilt/playerE.balance.failTilt,1);
-    balBar.style.width=(bal*100)+'%';
-    balBar.style.background=bal<0.45?'#7dff9b':bal<0.75?'#ffd23f':'#ff5c5c';
+    /* balance gauge: lean direction in camera space — step toward the dot */
+    player.quaternion.vmult(gaugeUp,gaugeUpV);
+    camera.getWorldDirection(gaugeF);gaugeF.y=0;
+    if(gaugeF.lengthSq()<0.01)gaugeF.set(0,0,1);gaugeF.normalize();
+    const gRx=-gaugeF.z,gRz=gaugeF.x; // screen-right in xz
+    const gscale=1/Math.sin(playerE.balance.failTilt);
+    let gx=(gaugeUpV.x*gRx+gaugeUpV.z*gRz)*gscale;
+    let gy=(gaugeUpV.x*gaugeF.x+gaugeUpV.z*gaugeF.z)*gscale;
+    const gm=Math.hypot(gx,gy);
+    if(gm>1){gx/=gm;gy/=gm}
+    balDot.style.left=(50+gx*40)+'%';
+    balDot.style.top=(50-gy*40)+'%';
+    balDot.style.background=gm<0.45?'#7dff9b':gm<0.75?'#ffd23f':'#ff5c5c';
+    balGauge.classList.toggle('warn',gm>=0.75);
     if(t>=60){
       if(playerE.balance.alive)endWin();
       else{if(S.fellAt==null)S.fellAt=t;endLose()}
@@ -649,9 +691,14 @@ function tick(){
     b.position.x+upV.x*0.7,
     b.position.y+upV.y*0.7,
     b.position.z+upV.z*0.7);
+  /* keep the camera inside the carriage so the view never buries itself in geometry */
+  camera.position.y=Math.max(camera.position.y,0.18);
+  camera.position.x=Math.max(-1.22,Math.min(1.22,camera.position.x));
+  camera.position.z=Math.max(-7.85,Math.min(7.85,camera.position.z));
   if(playerE.balance.alive){
-    const yaw=Math.PI-mouse.x*2.2;
-    const pitch=Math.max(-1.1,Math.min(1.1,-mouse.y*1.6-Math.atan2(upV.z,upV.y)*0.4));
+    const yaw=pointerLocked?Math.PI+lookYaw:Math.PI-mouse.x*2.2;
+    const lookP=pointerLocked?lookPitch:-mouse.y*1.6;
+    const pitch=Math.max(-1.15,Math.min(1.15,lookP-Math.atan2(upV.z,upV.y)*0.4));
     const roll=Math.atan2(upV.x,upV.y)*0.55;
     camera.rotation.order='YXZ';
     camera.rotation.set(pitch,yaw,roll);

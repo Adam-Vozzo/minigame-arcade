@@ -146,9 +146,9 @@ grid.position.y=-45;tiltG.add(grid);
 /* ---------- track ---------- */
 const HALF_W=7,BALL_R=1.15;
 const ctrl=[
-  [0,0,0],[34,1,-6],[58,3,-26],[62,6,-54],[44,7,-72],[16,6,-76],
-  [-6,4,-62],[-4,2,-40],[-20,2,-28],[-44,3,-36],[-58,6,-58],[-76,7,-46],
-  [-78,5,-20],[-62,2,-2],[-38,0,4],[-20,0,2]
+  [0,0,0],[34,1,-6],[58,5,-26],[62,11,-54],[44,14,-72],[16,11,-76],
+  [-6,6,-62],[-4,3,-40],[-20,2,-28],[-44,5,-36],[-58,10,-58],[-76,14,-46],
+  [-78,10,-20],[-62,4,-2],[-38,1,4],[-20,0,2]
 ].map(p=>new THREE.Vector3(p[0],p[1],p[2]));
 const curve=new THREE.CatmullRomCurve3(ctrl,true,'centripetal',0.6);
 const N=800;
@@ -166,6 +166,29 @@ const samples=[];
   }
 }
 const TRACK_LEN=samples[N-1].s+samples[N-1].pos.distanceTo(samples[0].pos);
+/* banking: lean corners toward the inside, proportional to curvature */
+{
+  const raw=new Float32Array(N);
+  for(let i=0;i<N;i++){
+    const a=samples[(i-6+N)%N].tan,b=samples[(i+6)%N].tan;
+    const cy=a.z*b.x-a.x*b.z;             // (a x b).y — positive = left turn
+    const dot=Math.max(-1,Math.min(1,a.x*b.x+a.z*b.z));
+    raw[i]=Math.atan2(cy,dot);
+  }
+  for(let pass=0;pass<2;pass++){
+    const sm2=new Float32Array(N);
+    for(let i=0;i<N;i++){
+      let s2=0;
+      for(let o=-10;o<=10;o++)s2+=raw[(i+o+N)%N];
+      sm2[i]=s2/21;
+    }
+    raw.set(sm2);
+  }
+  for(let i=0;i<N;i++){
+    const phi=Math.max(-0.42,Math.min(0.42,raw[i]*0.9));
+    samples[i].bank=Math.tan(phi);
+  }
+}
 
 /* ribbon mesh */
 const trackTex=(()=>{
@@ -185,6 +208,7 @@ const trackTex=(()=>{
     const sm=samples[i%N];
     const a=sm.pos.clone().addScaledVector(sm.left,HALF_W);
     const b=sm.pos.clone().addScaledVector(sm.left,-HALF_W);
+    a.y-=HALF_W*sm.bank;b.y+=HALF_W*sm.bank; // banked corners
     verts.push(a.x,a.y,a.z,b.x,b.y,b.z);
     uvs.push(0,sm.s/8,1,sm.s/8);
     if(i<N){const k=i*2;idx.push(k,k+1,k+2,k+1,k+3,k+2)}
@@ -201,7 +225,9 @@ for(const side of[1,-1]){
   const pts=[];
   for(let i=0;i<N;i+=5){
     const sm=samples[i];
-    pts.push(sm.pos.clone().addScaledVector(sm.left,side*HALF_W).add(new THREE.Vector3(0,0.25,0)));
+    const p=sm.pos.clone().addScaledVector(sm.left,side*HALF_W).add(new THREE.Vector3(0,0.25,0));
+    p.y-=side*HALF_W*sm.bank;
+    pts.push(p);
   }
   const c=new THREE.CatmullRomCurve3(pts,true);
   const tube=new THREE.Mesh(new THREE.TubeGeometry(c,300,0.16,6,true),
@@ -254,8 +280,12 @@ for(const frac of[0.09,0.28,0.47,0.62,0.80,0.93]){
 const ball=new THREE.Group();scene.add(ball);
 const jellyMat=new THREE.MeshStandardMaterial({color:0xffb347,roughness:0.25,metalness:0,
   emissive:0x854d00,emissiveIntensity:0.25,transparent:true,opacity:0.92});
-const body=new THREE.Mesh(new THREE.SphereGeometry(BALL_R,24,18),jellyMat);
+const body=new THREE.Mesh(new THREE.SphereGeometry(BALL_R,28,22),jellyMat);
 ball.add(body);
+/* soft-body illusion: we push the sphere's vertices around every frame */
+const jellyPos=body.geometry.attributes.position;
+const jellyBase=jellyPos.array.slice();
+let jiggle=0,jigglePhase=0;
 /* rolling speckles so you can see it roll */
 const speckG=new THREE.Group();body.add(speckG);
 for(let i=0;i<10;i++){
@@ -363,7 +393,7 @@ function resize(){renderer.setSize(innerWidth,innerHeight,false);
   camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix()}
 addEventListener('resize',resize);resize();
 
-const ACCEL=15.5,DRAG=0.011,G_SLOPE=30;
+const ACCEL=18,DRAG=0.011,G_SLOPE=30,G_BANK=20,STEER=1.7;
 const camF=new THREE.Vector3(),camR=new THREE.Vector3();
 const tiltCur=new THREE.Vector2();
 const tmpV=new THREE.Vector3(),tmpM=new THREE.Matrix4(),tmpQ=new THREE.Quaternion();
@@ -407,6 +437,18 @@ function tick(){
     const dy=samples[i1].pos.y-samples[i0].pos.y;
     const ds=Math.max(samples[i1].pos.distanceTo(samples[i0].pos),0.01);
     P.vel.addScaledVector(samples[i0].tan,-(dy/ds)*G_SLOPE*dt*0.55);
+    /* banked corners pull you toward the inside */
+    P.vel.addScaledVector(samples[i0].left,G_BANK*samples[i0].bank*dt);
+    /* grip steering: lateral tilt also bends the rolling direction */
+    if(state==='run'&&Math.abs(tiltCur.x)>0.02){
+      const sp0=P.vel.length();
+      if(sp0>1){
+        const th=-tiltCur.x*STEER*Math.min(1,sp0/9)*dt;
+        const c=Math.cos(th),s=Math.sin(th);
+        const nvx=P.vel.x*c+P.vel.z*s,nvz=-P.vel.x*s+P.vel.z*c;
+        P.vel.x=nvx;P.vel.z=nvz;
+      }
+    }
     /* drag */
     const sp=P.vel.length();
     P.vel.multiplyScalar(Math.max(0,1-(0.12+DRAG*sp)*dt));
@@ -429,11 +471,12 @@ function tick(){
           boing(Math.min(Math.abs(vLat)/25,0.35));
           burst(P.pos,10,Math.abs(vLat)*0.5,0x9be8ff);
           P.squishV+=Math.min(Math.abs(vLat)*0.05,0.5);
+          jiggle=Math.min(jiggle+Math.abs(vLat)*0.03,0.4);
         }
       }
     }
-    /* ride height */
-    const targY=sm.pos.y+BALL_R;
+    /* ride height on the banked surface */
+    const targY=sm.pos.y-lat*sm.bank+BALL_R;
     P.pos.y+=(targY-P.pos.y)*Math.min(1,dt*10);
 
     /* lap / sector logic via track progress */
@@ -457,13 +500,40 @@ function tick(){
   /* squish spring */
   P.squishV+=(-P.squish*90-P.squishV*9)*dt;
   P.squish+=P.squishV*dt;
-  const wob=Math.sin(clock.elapsedTime*9)*0.02;
-  const sq=THREE.MathUtils.clamp(P.squish,-0.4,0.55);
+  const sq=THREE.MathUtils.clamp(P.squish,-0.5,0.6);
   const spd=P.vel.length();
-  const stretch=Math.min(spd/60,0.25);
   ball.position.copy(P.pos);
-  body.scale.set(1+sq*0.5+wob+stretch*0.3,1-sq-wob*0.5,1+sq*0.5+wob-stretch*0.1);
-  face.scale.copy(body.scale);
+
+  /* ---- jelly vertex deformation ---- */
+  jiggle=Math.max(jiggle*(1-3.0*dt),Math.min(spd*0.0035,0.10));
+  jigglePhase+=dt*(13+spd*0.35);
+  const sy=1-sq,sxz=1+sq*0.55;
+  const vdx=spd>0.5?P.vel.x/spd:0,vdz=spd>0.5?P.vel.z/spd:1;
+  const stretch=Math.min(spd/55,0.3);
+  const flat=THREE.MathUtils.clamp(0.10+sq*0.4+spd*0.0022,0.05,0.5)*BALL_R;
+  const floorY=-(BALL_R-flat);
+  for(let i=0;i<jellyPos.count;i++){
+    let x=jellyBase[i*3],y=jellyBase[i*3+1],z=jellyBase[i*3+2];
+    const nx=x/BALL_R,ny=y/BALL_R,nz=z/BALL_R;
+    const az=Math.atan2(nz,nx);
+    const d=nx*vdx+nz*vdz;
+    const radial=1
+      +jiggle*Math.sin(az*3+jigglePhase)*0.65
+      +jiggle*Math.sin(ny*5-jigglePhase*1.35)*0.45
+      +stretch*(d*d-0.30);
+    x*=radial*sxz;z*=radial*sxz;y*=radial*sy;
+    if(y<floorY){ /* squash flat against the road, bulging outward */
+      const under=floorY-y;
+      y=floorY-under*0.12;
+      const bulge=1+under*0.5/BALL_R;
+      x*=bulge;z*=bulge;
+    }
+    jellyPos.setXYZ(i,x,y,z);
+  }
+  jellyPos.needsUpdate=true;
+  body.geometry.computeVertexNormals();
+  body.position.y=-flat*0.8; /* settle the flattened belly onto the road */
+  face.scale.set(1+sq*0.4,Math.max(0.4,1-sq*0.8),1+sq*0.4);
   /* roll the speckled body */
   if(spd>0.1){
     tmpV.set(P.vel.z,0,-P.vel.x).normalize(); // roll axis = up × v
@@ -486,6 +556,7 @@ function tick(){
       if(P.vel.length()>46)P.vel.setLength(46);
       whoosh();burst(P.pos,16,10,0x7dff9b);
       P.squishV-=0.9; /* stretch! */
+      jiggle=Math.min(jiggle+0.28,0.45);
     }
   }
 
