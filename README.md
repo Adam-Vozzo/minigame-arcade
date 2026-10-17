@@ -1,4 +1,4 @@
-# game8 · minigame arcade
+# Minigame Arcade
 
 A collection of small HTML game prototypes. One file per game, no build step,
 three.js from a CDN. Made to be hosted on GitHub Pages.
